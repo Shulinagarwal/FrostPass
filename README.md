@@ -1,210 +1,219 @@
-# FrostPass: benchmark author notes
+# FrostPass
 
-## Introduction
+### A security and recovery benchmark for LLM agents
 
-Refrigerated freight operators need to connect a quality review to the exact
-sensor data reviewed. Replacing the latest report, approving a good average
-while an individual sample was unsafe, or losing a release decision during a
-retry are realistic failure modes. FrostPass provides four immutable services
-and asks the solver to build the infrastructure that keeps those boundaries.
+![Evaluation](https://img.shields.io/badge/evaluation-35_groups_%C2%B7_100_points-2563eb)
+![Reference result](https://img.shields.io/badge/reference-100%2F100-15803d)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Terraform](https://img.shields.io/badge/IaC-Terraform_%2F_OpenTofu-7B42BC)
+![AWS accounts](https://img.shields.io/badge/AWS-2_emulated_accounts-orange)
 
-The task preserves SealRoom's directory organization, offline toolchain,
-two-account endpoint, separate runner, policy evaluation helpers and lifecycle
-testing approach. It introduces a distinct release workflow: approval of an
-unsafe report is insufficient, dispatcher receives a certificate rather than
-file contents, every sample is validated, and a request ID binds one durable
-decision. It also replaces the non-atomic receipt copy with a conditional write.
+**Can an AI agent deploy a secure system that preserves its decisions through retries, concurrent requests, broken infrastructure, and lost state?**
 
-The difficulty is compositional. A basic Lambda deployment can pass a happy
-path yet fail caller isolation, encryption context, attribute restrictions,
-replay races, state adoption or teardown. Clear contracts make failure
-diagnosable and fair. No finite benchmark can guarantee that every model fails;
-hardness should ultimately be measured by model trials, not ambiguous rules.
+FrostPass tests this through a refrigerated freight release workflow. A carrier uploads an encrypted sensor report, an approver reviews a specific version, and a dispatcher requests a release certificate. The system must reject unsafe or malformed telemetry, preserve the first recorded decision, and recover without losing the evidence behind it.
 
-## Infrastructure Used
+Agents provision and connect four supplied application services using Terraform or OpenTofu. The evaluator checks observable behavior, permissions, persistence, and deployment recovery across two locally emulated AWS accounts.
 
-| Component | Account | Purpose and boundary |
-| --- | --- | --- |
-| Intake Lambda + role | Archive | Write encrypted report versions; never read telemetry |
-| Versioned private S3 report bucket | Archive | Preserve reviewed v1 even after unsafe v2 arrives |
-| KMS key + stable alias | Archive | Envelope keys bound to exactly shipment/sensor context; alias assists recovery |
-| Reader IAM role / STS | Archive | Only Gate assumes it; reads only reports and decrypts only the permitted key |
-| Approval Manager Lambda + role | Access | Owns approval transitions; column-scoped creation |
-| Approval DynamoDB table | Access | Consistent state and version/digest/expiry binding |
-| Gate Lambda + role | Access | Checks current approval and full report; conditional first-writer decision |
-| Decision DynamoDB table + stream | Access | Immutable request fingerprint and exact response; no release without persistence |
-| Witness Lambda + role | Access | Copies ledger rows to archive; has no report or KMS access |
-| Private versioned receipt S3 bucket | Archive | Inspectable durable receipt; conditional writes prevent replay/race versions |
-| Stream mapping | Access | Low-latency receipt delivery; exactly one after recovery |
-| Scheduler group, schedule and role | Access | Repairs missed receipts while mapping is absent; source-group trust limits deputy scope |
-| Caller IAM users and keys | Both | Three single-function callers and a powerless outsider |
+[Task instructions](instruction.md) · [Runtime contract](environment/workspace/contracts/runtime.md) · [Reference solution](solution/) · [Validation results](tools/validation/VALIDATION.md) · [Design rationale](reasoning.md)
 
-The application does not create infrastructure. Roles keep authority separate;
-identity policies alone cannot protect data against other same-account
-principals, so report read-denies and a non-delegating KMS key policy matter.
-The emulator cannot enforce every AWS policy rule, so live behavior and an
-independent policy evaluator are combined. Unsupported conditions never become
-an accidental pass.
+## At a glance
 
-## Operational Flows
+| Capability | What FrostPass exercises |
+| --- | --- |
+| LLM agent evaluation | 35 scored capability groups, weighted scoring, and gates for critical failures. |
+| Cloud security | Cross-account role assumption, narrow IAM permissions, KMS encryption context, and private versioned storage. |
+| Distributed systems | Conditional writes, concurrent request conflicts, durable idempotency, and receipt reconciliation. |
+| Infrastructure recovery | Deleted resources, lost or stale state, corrupted state, and an interrupted deployment. |
+| Evaluation quality | Separate submission execution, live API checks, policy analysis, and deliberately faulty application variants. |
+
+## Architecture
 
 ```mermaid
-sequenceDiagram
-    participant C as Carrier
-    participant I as Intake / archive
-    participant S as S3 + KMS / archive
-    participant A as Approver
-    participant G as Approval Manager / access
-    participant D as Dispatcher
-    participant B as Release Gate / access
-    participant L as Decision ledger
-    participant W as Receipt Witness
-    C->>I: Report bytes
-    I->>S: GenerateDataKey, AES-GCM, versioned PutObject
-    I-->>C: version + plaintext SHA-256
-    A->>G: Create approval pinned to version + digest
-    A->>G: Approve
-    D->>B: Evaluate(request ID, approval, scope)
-    B->>L: Consistent lookup by request ID
-    B->>G: Consistent approval lookup
-    B->>S: Assume reader, GetObject(version), Decrypt
-    B->>B: Digest, report identity, every integer sample
-    B->>L: Conditional PutItem decision before response
-    B-->>D: Release certificate or denial
-    L->>W: NEW_IMAGE stream
-    W->>S: Conditional receipt PutObject
+flowchart LR
+    C[Carrier] --> I
+    Q[Quality approver] --> G
+    D[Dispatcher] --> B
+
+    subgraph Archive[Archive account]
+        I[Carrier Intake Lambda]
+        S[(Versioned encrypted reports)]
+        K[KMS key]
+        R[Reader role]
+        A[(Versioned decision receipts)]
+        I --> S
+        I --> K
+        R --> S
+        R --> K
+    end
+
+    subgraph Operations[Operations account]
+        G[Approval Manager Lambda]
+        T[(Approval table)]
+        B[Release Gate Lambda]
+        L[(Decision ledger)]
+        W[Receipt Witness Lambda]
+        E[EventBridge Scheduler]
+        G --> T
+        B --> T
+        B -->|Persist before responding| L
+        L -->|DynamoDB stream| W
+        E -->|Reconcile missed receipts| W
+    end
+
+    B -->|STS AssumeRole| R
+    W --> A
 ```
 
-### Retries and collisions
+| Service | Responsibility |
+| --- | --- |
+| **Carrier Intake** | Encrypt report bytes with AES-GCM and store a distinct S3 object version. |
+| **Approval Manager** | Create, approve, and revoke approvals bound to a shipment, sensor, report version, and SHA-256 digest. |
+| **Release Gate** | Validate the approval, retrieve the pinned report, check every sample, and durably record a release or denial. |
+| **Receipt Witness** | Mirror decisions to the archive without overwriting existing receipts; reconcile missed stream deliveries on a schedule. |
 
-Canonical JSON gives an order-independent request fingerprint. The first
-conditional writer wins. Matching retries read the saved response; conflicting
-payloads under the same ID deny without altering that response. A denial is
-equally immutable: approval later requires a fresh evaluation ID. Revocation
-affects fresh IDs, while replay is a historical receipt. The contract makes
-this distinction explicit so no test silently expects contradictory behavior.
+The four application images are fixed. The agent's task is to provision the infrastructure and implement its lifecycle automation.
 
-Concurrent tests send eight identical requests and eight alternating conflicting
-ones through real Lambda invocations. They verify the winning fingerprint and
-saved response. Receipt reconciliation races four workers through the missing
-object path and checks exactly one remaining S3 version. Head-then-put without
-a conditional request is inadequate for this last case.
+## Behavior that makes the benchmark challenging
 
-The underlying atomic operations follow AWS's documented
-[conditional DynamoDB PutItem](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html)
-and [S3 conditional-write semantics](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html).
+### Exact evidence, exact decision
 
-### Faults and recovery
+An approval applies to one report version and digest. Uploading a newer report must not change what an existing approval means. Every temperature sample must satisfy the benchmark's inclusive **2–8 °C** range; an acceptable average cannot hide an unsafe sample.
 
-```mermaid
-flowchart TD
-    A[Deploy and record storage identities] --> B[Create safe v1 and unsafe v2]
-    B --> C[Release, deny, replay, race, mirror]
-    C --> D[Remove mapping; scheduler must mirror within 120 seconds]
-    D --> E[Delete Gate, policies and schedule; alter reader trust]
-    E --> F[Deploy repairs drift without replacing data]
-    F --> G[Delete state; adopt resources and rotate caller keys]
-    G --> H[Restore old state; drop stale IDs and adopt live replacements]
-    H --> I[Corrupt state; preserve bytes and recover]
-    I --> J[Second copy: SIGKILL deploy after first role]
-    J --> K[Resume, isolate both deployments, no duplicate mapping]
-    K --> L[Scoped destroy; prefix-sharing decoys survive]
-    L --> M[State-free destroy and deploy again under same/new prefix]
-```
+The Gate returns a release certificate or a denial. Raw sensor report bytes stay private.
 
-Reference recovery discovers exact resource names and relationships rather than
-deleting everything that starts with the prefix. Stable storage is imported;
-stream mappings are filtered locally because endpoint filters are unreliable.
-Unreadable state is moved aside. A restored state's old access-key IDs are
-discarded when they differ from the live manifest, allowing new keys to be
-created. The manifest is mode 0600, written and fsynced, atomically replaced,
-then its directory fsynced before old keys are retired. Partial rotations after
-a crash retain the published key and clean only unreferenced keys.
+### Durable decisions under concurrency
 
-A crash can leave only a subset of the four access-key addresses in state.
-Recovery removes only recorded addresses; attempting to remove all four makes
-Terraform fail on missing entries. A focused regression covers empty, partial
-and complete key states, and repeated real SIGKILL trials validate recovery.
+One request ID identifies one immutable evaluation:
 
-The verifier watches old-key availability during rotation, checks caller user
-identities, stream mapping count, creation timestamps, report versions and
-receipt version counts, then reruns an old approved report. Mere exit-code
-success or a plausible manifest cannot satisfy recovery.
+- Identical retries return the original stored response.
+- Different payloads using the same request ID are rejected as conflicts.
+- Concurrent requests converge on one winning request fingerprint.
+- A certificate can be returned only after its decision is persisted.
+- Historical replay preserves the recorded response; a new request checks the current approval and revocation state.
 
-### Good adversarial cases
+Receipt writes are also conditional. Stream retries and scheduled reconciliation must leave exactly one receipt version for each decision.
 
-- Safe 2000 and 8000 milli-Celsius endpoints; unsafe 1999 and 8001.
-- First, middle and 64th-sample excursions to defeat averages/latest-only checks.
-- Boolean, float, null, string, empty, oversized, wrong-header and non-UTF-8 reports.
-- Reviewed digest differing from actual bytes; nonexistent pinned version.
-- Safe v1 followed by unsafe v2, so latest-object reads fail observably.
-- Pending/expired/revoked/out-of-scope approvals, with distinct request IDs.
-- Identical replay, key-order replay, four field collisions and two concurrent fingerprints.
-- A deny on decision PutItem while report retrieval still works: no certificate.
-- Same-account S3-read probe and an STS-enabled wrong reader.
-- Context absent, missing one key, extra key, and unauthorized KMS operations.
-- Scheduler from the wrong group, wrong account, or absent source context.
-- Mapping removal, drift, three state failures, crash, two deployments and prefix-sharing decoys.
+### Recovery with surviving data intact
 
-## Score
+The evaluator deletes or alters resources, removes local state, restores stale state, corrupts state, and interrupts a second deployment. Automation must rediscover and adopt surviving resources, preserve stored reports and decisions, rotate caller credentials safely, and leave unrelated deployments untouched.
 
-The 35 groups sum to 100. Core release behavior, replay/concurrency and recovery
-carry more weight than structural checks. Every point is all-or-nothing within
-its group. A failed group records its error and later groups still run.
-Release failure caps at 40, caller/direct-storage failures at 50, and failed
-persist-before-release at 50. Only 100 is a full pass.
+Teardown is tested both with and without local state, including unrelated resources that share the deployment's name prefix.
 
-| Check | Points |
+## Evaluation and scoring
+
+The [verifier](tests/verify.py) combines workload checks with [infrastructure checks](tests/infrastructure_checks.py). Submission scripts execute in a separate runner without the verifier source or Docker socket. Security evaluation combines live API behavior with policy analysis because the emulator does not enforce every AWS rule.
+
+**35 capability groups sum to 100 points.** Each group awards all or none of its points, and a full pass requires 100/100.
+
+| Evaluation area | Representative checks |
+| --- | --- |
+| Release correctness | Version pinning, digest verification, temperature boundaries, malformed telemetry, and approval scope. |
+| Persistence and concurrency | Stable replay, request collisions, concurrent decisions, immutable receipts, and failure to persist a decision. |
+| Security boundaries | Caller isolation, direct storage denial, attribute-level table writes, exact KMS context, and Scheduler trust. |
+| Availability and lifecycle | Scheduled reconciliation, drift repair, state recovery, interrupted deployment, and scoped cleanup. |
+
+Critical failures limit the final score:
+
+| Failed capability | Score ceiling |
 | --- | ---: |
-| contract and declared state | 1 |
-| four service topology | 1 |
-| storage and bucket policy | 1 |
-| two retained report versions | 2 |
-| encrypted telemetry and reader trust | 3 |
-| pending, expired and mismatched grants | 3 |
-| approved version release | 4 |
-| temperature boundaries and every sample | 4 |
-| malformed and identity-mismatched telemetry | 3 |
-| reviewed digest and missing version | 3 |
-| stable replay and request collision | 4 |
-| concurrent duplicate and conflicting requests | 4 |
-| historical replay versus current revocation | 3 |
-| exact archive receipt contents | 2 |
-| concurrent receipt reconciliation | 2 |
-| caller isolation | 2 |
-| direct storage denial | 2 |
-| least-privilege policies | 3 |
-| attribute-level table writes | 3 |
-| ledger failure closes release | 4 |
-| revocation and audit | 2 |
-| mirrored decisions | 1 |
-| immutable reports and receipts | 3 |
-| KMS key use and exact encryption context | 4 |
-| scheduled reconciliation without stream | 3 |
-| scheduler confused-deputy protection | 3 |
-| stable redeploy | 2 |
-| repair of deleted and altered resources | 3 |
-| recovery after state loss | 6 |
-| recovery from restored stale state | 4 |
-| recovery from corrupted state | 3 |
-| isolated crash-consistent second deployment | 4 |
-| complete and scoped destroy | 3 |
-| destroy after state loss | 3 |
-| secret handling | 2 |
-| **Total** | **100** |
+| Approved version release | 40/100 |
+| Caller isolation or direct storage denial | 50/100 |
+| Closing release when ledger persistence fails | 50/100 |
 
-## Verification integrity and scope
+Detailed results are written to `/logs/verifier/report.json`, with machine-readable rewards in `reward.json` and `reward.txt`. Check for `invalid.json` and deployment/harness errors before attributing a low score to an agent.
 
-Submission executes as the agent user in a separate runner with no verifier
-code or Docker socket. Verifier controls are on a dedicated internal network.
-Both environments use independently built fixed images and public contracts;
-application and contract copies are checked for byte equality by the author
-quality tool. Terraform labels are not inspected for correctness. Manifest
-identifiers are checked against AWS APIs and state identifiers.
+## Recorded validation
 
-The task is a local AWS-shaped infrastructure benchmark. It is not a production
-cold-chain certification system: the temperature rule is synthetic and the
-certificate is an evaluation receipt, not physical shipment authorization.
-The app's algorithms are supplied rather than assigned to the solver. Their
-unit-level correctness and verifier rejection cases complement full reference
-end-to-end runs; actual model failure rates require separate model trials.
+The repository includes an author validation record dated **6 October 2026** and its [reference report](tools/validation/reference-report.json).
+
+| Check | Recorded result |
+| --- | --- |
+| Clean reference evaluation | **35/35 groups; 100/100 points** |
+| Recovery after state loss | **14.5 seconds** against a 90-second objective |
+| Recovery from restored stale state | **25.9 seconds** against a 90-second objective |
+| Recovery from corrupted state | **14.4 seconds**, preserving the damaged bytes |
+| Three additional interrupted-deployment trials | All recovered, released, and cleaned up |
+| Offline quality checks | **16 passed** |
+| Deliberately faulty application variants | **All five rejected** |
+
+The five faulty variants use average-only temperature checks, inspect only the final sample, omit the reviewed digest, overwrite the decision ledger unconditionally, or allow release after a failed ledger write.
+
+These results validate the reference implementation and test coverage. They do not measure LLM success rates. See the [validation notes](tools/validation/VALIDATION.md) for scope and the [design rationale](reasoning.md) for the full scoring breakdown.
+
+## Repository layout
+
+```text
+FrostPass/
+├── README.md
+├── instruction.md                  # Agent-facing task
+├── reasoning.md                    # Detailed design and scoring rationale
+├── environment/
+│   ├── application/                # Four supplied Lambda image sources
+│   ├── workspace/contracts/        # Runtime contract and manifest schema
+│   ├── Dockerfile
+│   └── docker-compose.yaml
+├── solution/                       # Reference Terraform and lifecycle scripts
+├── tests/
+│   ├── verify.py                   # Workload checks and scoring
+│   ├── infrastructure_checks.py    # Policy, state, recovery, and cleanup checks
+│   ├── runtime/runner.py           # Separate submission execution service
+│   └── docker-compose.yaml
+└── tools/
+    ├── check_project.py            # Offline checks and mutation cases
+    ├── smoke.py                    # Probe an existing deployment
+    ├── crash_probe.py              # Additional interrupted-deployment checks
+    └── validation/                 # Recorded results and source fingerprints
+```
+
+## Getting started
+
+### 1. Run the offline quality checks
+
+Requires **Python 3.11 or newer**. These checks use standard-library SDK shims and a conditional-write fake; no AWS account, Docker engine, or model access is needed.
+
+```bash
+git clone https://github.com/Shulinagarwal/FrostPass.git
+cd FrostPass
+python tools/check_project.py
+```
+
+### 2. Run the reference evaluation
+
+Requires a **Linux Docker engine**, Docker Compose v2, access to the Docker socket, and network access for image and dependency downloads. On Windows, use Docker Desktop with Linux containers and run these commands from WSL.
+
+The stack runs against the pinned Floci AWS emulator and bootstraps local credentials. No production AWS credentials are required. This workflow evaluates the supplied reference solution without launching an LLM.
+
+```bash
+# Start the verifier, submission runner, and emulated AWS services.
+docker compose -p frostpass-demo -f tests/docker-compose.yaml up -d --build --wait main
+
+# Provide the reference implementation as the submission.
+docker compose -p frostpass-demo -f tests/docker-compose.yaml cp solution/. main:/workspace/submission/
+
+# Evaluate and inspect the detailed report.
+docker compose -p frostpass-demo -f tests/docker-compose.yaml exec -T main bash /tests/test.sh
+docker compose -p frostpass-demo -f tests/docker-compose.yaml exec -T main cat /logs/verifier/report.json
+```
+
+Save results before removing the stack:
+
+```bash
+docker compose -p frostpass-demo -f tests/docker-compose.yaml cp main:/logs/verifier/ ./evaluation-results/
+docker compose -p frostpass-demo -f tests/docker-compose.yaml down --volumes --remove-orphans
+```
+
+Use a fresh Compose project or remove its previous volumes before another independent evaluation. The verifier deliberately changes and destroys resources within the local account.
+
+### Submission interface
+
+Agents work under `/workspace/submission/` and provide `deploy.sh`, `destroy.sh`, and Terraform/OpenTofu configuration under `infra/`. A successful deployment atomically publishes a mode-0600 `manifest.json` matching the [manifest schema](environment/workspace/contracts/manifest.schema.json).
+
+`FROSTPASS_PREFIX` selects the deployment. Normal deployment has a 720-second budget, recovery from lost, stale, or corrupted state has 90 seconds, and teardown has 900 seconds. The [runtime contract](environment/workspace/contracts/runtime.md) defines the complete behavior and permissions.
+
+## Scope
+
+FrostPass demonstrates LLM agent evaluation, cloud security, distributed decision recording, and infrastructure recovery. Its temperature range is a synthetic benchmark rule, and its certificates are evaluation outputs. The local AWS environment supports repeatable testing; production deployment and real freight authorization require separate validation.
+
+---
+
+Created by [Shulin Agarwal](https://github.com/Shulinagarwal).
