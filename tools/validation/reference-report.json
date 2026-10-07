@@ -1,0 +1,183 @@
+{
+  "score": 100,
+  "raw_score": 100,
+  "cap": 100,
+  "gates": [],
+  "tests": [
+    {
+      "name": "contract and declared state",
+      "points": 1,
+      "earned": 1
+    },
+    {
+      "name": "four service topology",
+      "points": 1,
+      "earned": 1
+    },
+    {
+      "name": "storage and bucket policy",
+      "points": 1,
+      "earned": 1
+    },
+    {
+      "name": "two retained report versions",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "encrypted telemetry and reader trust",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "pending, expired and mismatched grants",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "approved version release",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "temperature boundaries and every sample",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "malformed and identity-mismatched telemetry",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "reviewed digest and missing version",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "stable replay and request collision",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "concurrent duplicate and conflicting requests",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "historical replay versus current revocation",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "exact archive receipt contents",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "concurrent receipt reconciliation",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "caller isolation",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "direct storage denial",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "least-privilege policies",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "attribute-level table writes",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "ledger failure closes release",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "revocation and audit",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "mirrored decisions",
+      "points": 1,
+      "earned": 1
+    },
+    {
+      "name": "immutable reports and receipts",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "KMS key use and exact encryption context",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "scheduled reconciliation without stream",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "scheduler confused-deputy protection",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "stable redeploy",
+      "points": 2,
+      "earned": 2
+    },
+    {
+      "name": "repair of deleted and altered resources",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "recovery after state loss",
+      "points": 6,
+      "earned": 6
+    },
+    {
+      "name": "recovery from restored stale state",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "recovery from corrupted state",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "isolated crash-consistent second deployment",
+      "points": 4,
+      "earned": 4
+    },
+    {
+      "name": "complete and scoped destroy",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "destroy after state loss",
+      "points": 3,
+      "earned": 3
+    },
+    {
+      "name": "secret handling",
+      "points": 2,
+      "earned": 2
+    }
+  ]
+}

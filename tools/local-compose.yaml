@@ -1,0 +1,24 @@
+services:
+  floci:
+    image: floci/floci:2.1.0@sha256:f5aa8c18302cedb4f2385f5c4e455b3efc77fee6bf7b6e5d1712b2817ba102db
+    ports:
+      - "4566:4566"
+    environment:
+      FLOCI_HOSTNAME: aws
+      FLOCI_DEFAULT_REGION: us-east-1
+      FLOCI_DOCKER_DOCKER_HOST: unix:///var/run/docker.sock
+      FLOCI_SERVICES_DOCKER_NETWORK: frostpass_workload
+      FLOCI_SERVICES_LAMBDA_DOCKER_NETWORK: frostpass_workload
+      FLOCI_SERVICES_LAMBDA_DOCKER_HOST_OVERRIDE: aws
+      FLOCI_SERVICES_S3_GLOBAL_BUCKET_NAMESPACE: "true"
+      FLOCI_SERVICES_IAM_ENFORCEMENT_ENABLED: "true"
+      FLOCI_SERVICES_S3_ENFORCE_AUTH: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      workload:
+        aliases: [aws]
+
+networks:
+  workload:
+    name: frostpass_workload

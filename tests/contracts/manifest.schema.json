@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FrostPass submission manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["region", "endpoint", "accounts", "functions", "bucket", "audit_bucket", "evidence_key", "archive_reader_role", "reconciliation_schedule", "tables", "callers"],
+  "properties": {
+    "region": { "const": "us-east-1" },
+    "endpoint": { "const": "http://aws:4566" },
+    "accounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["archive", "access"],
+      "properties": {
+        "archive": { "const": "111111111111" },
+        "access": { "const": "222222222222" }
+      }
+    },
+    "functions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intake", "grants", "broker", "witness"],
+      "properties": {
+        "intake": { "$ref": "#/$defs/name" },
+        "grants": { "$ref": "#/$defs/name" },
+        "broker": { "$ref": "#/$defs/name" },
+        "witness": { "$ref": "#/$defs/name" }
+      }
+    },
+    "bucket": { "$ref": "#/$defs/name" },
+    "audit_bucket": { "$ref": "#/$defs/name" },
+    "evidence_key": { "$ref": "#/$defs/name" },
+    "archive_reader_role": { "$ref": "#/$defs/name" },
+    "reconciliation_schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "name"],
+      "properties": {
+        "group": { "$ref": "#/$defs/name" },
+        "name": { "$ref": "#/$defs/name" }
+      }
+    },
+    "tables": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grants", "audit"],
+      "properties": {
+        "grants": { "$ref": "#/$defs/name" },
+        "audit": { "$ref": "#/$defs/name" }
+      }
+    },
+    "callers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["custodian", "approver", "reviewer", "outsider"],
+      "properties": {
+        "custodian": { "$ref": "#/$defs/credentials" },
+        "approver": { "$ref": "#/$defs/credentials" },
+        "reviewer": { "$ref": "#/$defs/credentials" },
+        "outsider": { "$ref": "#/$defs/credentials" }
+      }
+    }
+  },
+  "$defs": {
+    "name": { "type": "string", "minLength": 1 },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["access_key_id", "secret_access_key"],
+      "properties": {
+        "access_key_id": { "type": "string", "minLength": 1 },
+        "secret_access_key": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
